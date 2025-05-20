@@ -192,7 +192,7 @@ class WebSocketServer {
         }
 
         void sendInfo() {
-            std::vector<uint8_t> buffer(1 + 7 * m_connections.size());
+            std::vector<uint8_t> buffer(1 + 6 * m_connections.size());
             buffer[0] = OPCODE_CURSOR_INFO;
             int offset = 1;
             for(auto &pair: m_connections) {
