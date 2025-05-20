@@ -13,9 +13,10 @@
 
 #define OPCODE_CS_PING 0x00
 #define OPCODE_CS_PONG 0x01
-#define OPCODE_DIMENSIONS 0x02
+#define OPCODE_HELLO 0x02
 #define OPCODE_ENTER_GAME 0x03
 #define OPCODE_CURSOR 0x04
+#define OPCODE_RESIZE 0x05
 
 #define OPCODE_SC_PING 0x00
 #define OPCODE_SC_PONG 0x01
@@ -143,13 +144,21 @@ class WebSocketServer {
                     std::cout << "Pong!" << std::endl;
                     break;
                 }
-                case OPCODE_DIMENSIONS:
+                case OPCODE_HELLO:
                 {
                     if(buffer.size() >= 5) {
                         std::memcpy(&io.screen_width, &buffer[1], sizeof(uint16_t));
                         std::memcpy(&io.screen_height, &buffer[3], sizeof(uint16_t));
                     }
                     if(!io.sentHello) io.sentHello = true;
+                    break;
+                }
+                case OPCODE_RESIZE:
+                {
+                    if(buffer.size() >= 5) {
+                        std::memcpy(&io.screen_width, &buffer[1], sizeof(uint16_t));
+                        std::memcpy(&io.screen_height, &buffer[3], sizeof(uint16_t));
+                    }
                     break;
                 }
                 case OPCODE_ENTER_GAME:
