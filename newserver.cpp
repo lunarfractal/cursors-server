@@ -8,11 +8,10 @@
 
 // A structure representing a cursor on the screen.
 struct cursor_data {
-    /* 
-      we don't need the id as a member.
-      the only place where raw cursor data is stored and being accessed from is the unordered map.
-      if you're accessing a cursor, it means you already know the id which is the key in the map.
-    */
+    cursor_data(uint32_t i, std::string w) : id(i), x(0), y(0),
+        nick(""), world(w) {}
+
+    uint32_t id;
 
     // the cursor's position on it's own screen (pageX, pageY)
     uint32_t x, y;
@@ -23,6 +22,8 @@ struct cursor_data {
     std::string nick;
 
     std::string world;
+
+    uint8_t del; // whether its being deleted
 
     // we need screen data to calculate the position relative to the other cursor's screen
     uint16_t screen_width = 1370, screen_height = 600; // the page's scrollable area (documentElement.scrollWidth, documentElement.scrollHeight)
@@ -62,6 +63,25 @@ struct cursor_data {
     }
 };
 
+// util functions must follow camelCase in my opinion
+uint32_t getUniqueId() {
+    auto now = std::chrono::steady_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                  now.time_since_epoch()
+              ).count();
+
+    uint32_t timeComponent = static_cast<uint32_t>(ms);
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<uint32_t> dis(0, 0xFFFFFFFF);
+    uint32_t randomComponent = dis(gen);
+
+    uint32_t uniqueId = timeComponent ^ randomComponent;
+
+    return uniqueId;
+}
+
 
 // now get to the webSocket server
 using websocketpp::lib::bind;
@@ -84,7 +104,7 @@ public:
         m_server.clear_access_channels(websocketpp::log::alevel::all); // I wanted to keep error logging
     }
 
-    run(uint16_t port) {
+    void run(uint16_t port) {
         m_server.listen(port);
         m_server.start_accept();
 
@@ -97,11 +117,32 @@ public:
         }
     }
 
-    shutdown() {
+    void shutdown() {
         m_connections.clear();
         m_server.stop_listening();
     }
 
+    void on_open(connection_hdl hdl) {
+        server::connection_ptr con = m_server.get_con_from_hdl(hdl);
+        std::string resource = con->get_resource();
+        
+        m_connections[hdl] = cursor_data(getUniqueId(), resource);
+    }
+
+    void on_close(connection_hdl hdl) {
+        m_connections[hdl].del = 0x1;
+    }
+
+    void on_message(connection_hdl hdl, message_ptr msg) {
+        if (msg->get_opcode() == websocketpp::frame::opcode::binary) {
+            std::string payload = msg->get_payload();
+            prcoess_message(payload);
+        } else if (msg->get_opcode() == websocketpp::frame::opcode::text) {} else {}
+    }
+
+    void process_message() {}
+
+    void cursor_loop() {}
 private:
     server m_server;
 
