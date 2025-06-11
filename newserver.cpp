@@ -26,7 +26,7 @@ struct cursor_data {
     uint8_t del; // whether its being deleted
 
     // we need screen data to calculate the position relative to the other cursor's screen
-    uint16_t screen_width = 1370, screen_height = 600; // the page's scrollable area (documentElement.scrollWidth, documentElement.scrollHeight)
+    uint32_t screen_width = 1370, screen_height = 600; // the page's scrollable area (documentElement.scrollWidth, documentElement.scrollHeight)
 
     // partial
     std::vector<uint8_t>& get_partial_data(std::vector<uint8_t>& buffer, size_t& offset, const cursor_data& other_cursor) {
@@ -136,11 +136,47 @@ public:
     void on_message(connection_hdl hdl, message_ptr msg) {
         if (msg->get_opcode() == websocketpp::frame::opcode::binary) {
             std::string payload = msg->get_payload();
-            prcoess_message(payload);
+            prcoess_message(payload, hdl);
         } else if (msg->get_opcode() == websocketpp::frame::opcode::text) {} else {}
     }
 
-    void process_message() {}
+    void process_message(std::string& data, connection_hdl hdl) {
+        cursor_data& cursor = m_connections[hdl];
+
+        switch(data[0]) {
+            case 0x00:
+            {
+                m_server.send(hdl, payload, websocketpp::frame::opcode::binary);
+                break;
+            }
+
+            case 0x1:
+            {
+                if(buffer.size() >= 9) {
+                    std::memcpy(&cursor.screen_width, &buffer[1], 4);
+                    std::memcpy(&cursor.screen_height, &buffer[5], 4);
+                }
+
+                break;
+            }
+
+            case 0x2:
+            {
+                if(buffer.size() >= 9) {
+                    std::memcpy(&cursor.x, &buffer[1], 4);
+                    std::memcpy(&cursor.y, &buffer[5], 4);
+                }
+            }
+
+            case 0x3:
+            {
+                if(buffer.size() >= 1 + 3 + 3) {
+                    std::memcpy(&cursor.x, &buffer[1], 4);
+                    std::memcpy(&cursor.y, &buffer[5], 4);
+                }
+            }
+        }
+    }
 
     void cursor_loop() {}
 private:
