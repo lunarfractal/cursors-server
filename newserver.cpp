@@ -253,7 +253,7 @@ public:
     void cursor_loop() {
         constexpr uint8_t opcode_cursors_v1 = 0xA4;
         while(1) {
-            while(m_actions.size() < 2) {
+            while(m_connections.size() < 2) {
                m_cursors_cond.wait(lock);
             }
             
