@@ -3,6 +3,7 @@
 #include <websocketpp/config/asio_no_tls.hpp>
 #include <websocketpp/server.hpp>
 #include <unordered_map>
+#include <unordered_set>
 #include <csignal>
 #include <vector>
 
@@ -112,6 +113,7 @@ uint32_t getUniqueId() {
 using websocketpp::lib::bind;
 using websocketpp::lib::placeholders::_1;
 using websocketpp::lib::placeholders::_2;
+using websocketpp::lib::condition_variable;
 
 typedef websocketpp::server<websocketpp::config::asio> server;
 typedef websocketpp::connection_hdl connection_hdl;
@@ -162,6 +164,8 @@ public:
 
         std::memcpy(&buffer[1], &id, 4);
         server.send(hdl, buffer, 5, websocketpp::frame::opcode::binary);
+
+        m_action_cond.notify_one();
     }
 
     void on_close(connection_hdl hdl) {
@@ -248,31 +252,37 @@ public:
 
     void cursor_loop() {
         constexpr uint8_t opcode_cursors_v1 = 0xA4;
-        for(auto &pair: m_connections) {
-            std::vector<uint8_t> buffer(1);
-            buffer[0] = opcode_cursors_v1;
-            buffer.reserve(m_connections.size() * 30);
-            int offset = 1;
-            
-            cursor_data& me = pair.second;
-            
-            for(auto &other_pair: m_connections) {
-                cursor_data& other = pair.second;
-
-                if(other.id == me.id) continue;
-                if(other.world != me.world) continue;
-
-                other.get_data(buffer, offset, other);
+        while(1) {
+            while(m_actions.size() < 2) {
+               m_cursors_cond.wait(lock);
             }
             
-            server.send(pair.first, buffer.data(), buffer.size(), websocketpp::frame::opcode::binary);
-        }
+            for(auto &pair: m_connections) {
+                std::vector<uint8_t> buffer(1);
+                buffer[0] = opcode_cursors_v1;
+                buffer.reserve(m_connections.size() * 30);
+                int offset = 1;
+            
+                cursor_data& me = pair.second;
+            
+                for(auto &other_pair: m_connections) {
+                    cursor_data& other = pair.second;
 
-        for(auto hdl: dels) {
-            m_connections.erase(hdl);
-        }
+                    if(other.id == me.id) continue;
+                    if(other.world != me.world) continue;
 
-        dels.clear();
+                    other.get_data(buffer, offset, other);
+                }
+            
+                server.send(pair.first, buffer.data(), buffer.size(), websocketpp::frame::opcode::binary);
+            }
+
+            for(auto hdl: dels) {
+                m_connections.erase(hdl);
+            }
+
+            dels.clear();
+        }
     }
 private:
     server m_server;
@@ -292,6 +302,8 @@ private:
     std::unordered_map<connection_hdl, cursor_data, connection_hdl_hash, connection_hdl_equal> m_connections;
 
     std::unordered_set<connection_hdl, connection_hdl_hash, connection_hdl_equal> dels;
+
+    condition_variable m_cursors_cond;
 };
 
 // some stuff
