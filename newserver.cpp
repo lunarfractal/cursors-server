@@ -44,7 +44,7 @@ struct cursor_data {
             if(del) {
                 buffer.resize(offset + 1);
                 buffer[offset++] = 0x3;
-                view.erase(other_cursor.id);
+                other_cursor.view.erase(other_cursor.id);
             } else {
                 buffer.resize(offset + 9);
             
@@ -272,7 +272,7 @@ public:
                     if(other.id == me.id) continue;
                     if(other.world != me.world) continue;
 
-                    other.get_data(buffer, offset, other);
+                    other.get_data(buffer, offset, me);
                 }
             
                 m_server.send(pair.first, buffer.data(), buffer.size(), websocketpp::frame::opcode::binary);
