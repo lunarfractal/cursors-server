@@ -163,7 +163,7 @@ public:
         buffer[0] = opcode_entered_game;
 
         std::memcpy(&buffer[1], &id, 4);
-        server.send(hdl, buffer, 5, websocketpp::frame::opcode::binary);
+        m_server.send(hdl, buffer, 5, websocketpp::frame::opcode::binary);
 
         m_action_cond.notify_one();
     }
@@ -176,11 +176,11 @@ public:
     void on_message(connection_hdl hdl, message_ptr msg) {
         if (msg->get_opcode() == websocketpp::frame::opcode::binary) {
             std::string payload = msg->get_payload();
-            prcoess_message(payload, hdl);
+            process_message(payload, hdl);
         } else if (msg->get_opcode() == websocketpp::frame::opcode::text) {} else {}
     }
 
-    void process_message(std::string& data, connection_hdl hdl) {
+    void process_message(std::string& buffer, connection_hdl hdl) {
         cursor_data& cursor = m_connections[hdl];
 
         constexpr uint8_t opcode_ping = 0x00;
@@ -190,10 +190,10 @@ public:
         constexpr uint8_t opcode_resize = 0x04;
         constexpr uint8_t opcode_redgreenblue = 0x05;
 
-        switch(data[0]) {
+        switch(buffer[0]) {
             case opcode_ping:
             {
-                m_server.send(hdl, payload, websocketpp::frame::opcode::binary);
+                m_server.send(hdl, buffer, websocketpp::frame::opcode::binary);
                 break;
             }
 
@@ -266,7 +266,7 @@ public:
                 cursor_data& me = pair.second;
             
                 for(auto &other_pair: m_connections) {
-                    cursor_data& other = pair.second;
+                    cursor_data& other = other_pair.second;
 
                     if(other.id == me.id) continue;
                     if(other.world != me.world) continue;
@@ -274,7 +274,7 @@ public:
                     other.get_data(buffer, offset, other);
                 }
             
-                server.send(pair.first, buffer.data(), buffer.size(), websocketpp::frame::opcode::binary);
+                m_server.send(pair.first, buffer.data(), buffer.size(), websocketpp::frame::opcode::binary);
             }
 
             for(auto hdl: dels) {
@@ -320,7 +320,7 @@ int main() {
     
     signal_handler_callback = [&server](int signum) {
         std::cout << "Signal " << signum << " received. Exiting cleanly";
-        s.shutdown();
+        server.shutdown();
         exit(signum);
     };
 
