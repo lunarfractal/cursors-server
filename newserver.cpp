@@ -24,42 +24,67 @@ struct cursor_data {
     std::string world;
 
     uint8_t del; // whether its being deleted
+    uint8_t is_full;
+
+    std::unordered_set<uint32_t> view;
 
     // we need screen data to calculate the position relative to the other cursor's screen
     uint32_t screen_width = 1370, screen_height = 600; // the page's scrollable area (documentElement.scrollWidth, documentElement.scrollHeight)
 
-    // partial
-    std::vector<uint8_t>& get_partial_data(std::vector<uint8_t>& buffer, size_t& offset, const cursor_data& other_cursor) {
-        float other_x = x * other_cursor.screen_width / 4294967295; // Ultra precision or inefficient calculation? idk
-        float other_y = y * other_cursor.screen_height / 4294967295;
+    void get_data(std::vector<uint8_t>& buffer, size_t& offset, const cursor_data& other_cursor) {
+        buffer.resize(offset + 4);
         
-        std::memcpy(&buffer[offset], &other_x, 4);
+        std::memcpy(&buffer[offset], &id, 4);
         offset += 4;
 
-        std::memcpy(&buffer[offset], &other_y, 4);
-        offset += 4;
-
-        return buffer;
-    }
-
-    // appear
-    std::vector<uint8_t>& get_full_data(std::vector<uint8_t>& buffer, size_t& offset, const cursor_data& other_cursor) {
-        uint32_t other_x = x * other_cursor.screen_width / 4294967295;
-        uint32_t other_y = y * other_cursor.screen_height / 4294967295;
+        uint8_t flags = 0x1;
         
-        std::memcpy(&buffer[offset], &other_x, 4);
-        offset += 4;
-
-        std::memcpy(&buffer[offset], &other_y, 4);
-        offset += 4;
-
-        std::memcpy(&buffer[offset], nick.c_str(), nick.length() + 1); // +1 to include the null terminator
-        offset += nick.length() + 1;
-
-        std::memcpy(&buffer[offset], redgreenblue, 3);
-        offset += 3;
+        if(other_cursor.view.find(id) == other_cursor.view.end()) {
+            if(del) {
+                buffer.resize(offset + 1);
+                buffer[offset++] = 0x3;
+                view.erase(other_cursor.id);
+            } else {
+                buffer.resize(offset + 9);
             
-        return buffer;
+                flags = 0x0;
+                other_cursor.view.insert(id); // my id
+
+                buffer[offset++] = flags;
+
+                float other_x = x * other_cursor.screen_width / 4294967295;
+                float other_y = y * other_cursor.screen_height / 4294967295;
+        
+                std::memcpy(&buffer[offset], &other_x, 4);
+                offset += 4;
+
+                std::memcpy(&buffer[offset], &other_y, 4);
+                offset += 4;
+            }
+        } else {
+            buffer.resize(offset + 9 + nick.length() + 1 + 3);
+            if(is_full) {
+                flags = 0x2;
+                is_full = 0x0;
+            }
+            
+            buffer[offset++] = flags;
+        
+            float other_x = x * other_cursor.screen_width / 4294967295; // Ultra precision
+            float other_y = y * other_cursor.screen_height / 4294967295;
+        
+            std::memcpy(&buffer[offset], &other_x, 4);
+            offset += 4;
+
+            std::memcpy(&buffer[offset], &other_y, 4);
+            offset += 4;
+
+            std::memcpy(&buffer[offset], nick.c_str(), nick.length() + 1); // +1 to include the null terminator
+            offset += nick.length() + 1;
+
+            std::memcpy(&buffer[offset], redgreenblue, 3);
+            offset += 3;        
+        }
     }
 };
 
@@ -123,14 +148,25 @@ public:
     }
 
     void on_open(connection_hdl hdl) {
+        constexpr uint8_t opcode_entered_game = 0xA1;
+        
         server::connection_ptr con = m_server.get_con_from_hdl(hdl);
         std::string resource = con->get_resource();
+
+        uint32_t id = getUniqueId();
         
-        m_connections[hdl] = cursor_data(getUniqueId(), resource);
+        m_connections[hdl] = cursor_data(id, resource);
+
+        uint8_t buffer[5];
+        buffer[0] = opcode_entered_game;
+
+        std::memcpy(&buffer[1], &id, 4);
+        server.send(hdl, buffer, 5, websocketpp::frame::opcode::binary);
     }
 
     void on_close(connection_hdl hdl) {
         m_connections[hdl].del = 0x1;
+        dels.insert(hdl);
     }
 
     void on_message(connection_hdl hdl, message_ptr msg) {
@@ -143,14 +179,21 @@ public:
     void process_message(std::string& data, connection_hdl hdl) {
         cursor_data& cursor = m_connections[hdl];
 
+        constexpr uint8_t opcode_ping = 0x00;
+        constexpr uint8_t opcode_hello = 0x01;
+        constexpr uint8_t opcode_cursor = 0x02;
+        constexpr uint8_t opcode_nick = 0x03;
+        constexpr uint8_t opcode_resize = 0x04;
+        constexpr uint8_t opcode_redgreenblue = 0x05;
+
         switch(data[0]) {
-            case 0x00:
+            case opcode_ping:
             {
                 m_server.send(hdl, payload, websocketpp::frame::opcode::binary);
                 break;
             }
 
-            case 0x1:
+            case opcode_hello:
             {
                 if(buffer.size() >= 9) {
                     std::memcpy(&cursor.screen_width, &buffer[1], 4);
@@ -160,25 +203,77 @@ public:
                 break;
             }
 
-            case 0x2:
+            case opcode_resize:
+            {
+                if(buffer.size() >= 9) {
+                    std::memcpy(&cursor.screen_width, &buffer[1], 4);
+                    std::memcpy(&cursor.screen_height, &buffer[5], 4);
+                }
+
+                break;
+            }
+
+            case opcode_cursor:
             {
                 if(buffer.size() >= 9) {
                     std::memcpy(&cursor.x, &buffer[1], 4);
                     std::memcpy(&cursor.y, &buffer[5], 4);
                 }
+
+                break;
             }
 
-            case 0x3:
+            case opcode_nick:
             {
                 if(buffer.size() >= 1 + 3 + 3) {
-                    std::memcpy(&cursor.x, &buffer[1], 4);
-                    std::memcpy(&cursor.y, &buffer[5], 4);
+                    cursor.nick.resize(buffer.size());
+                    std::memcpy(cursor.nick.data(), &buffer[1], buffer.size());
+                    cursor.is_full = 0x1;
                 }
+
+                break;
+            }
+
+            case opcode_redgreenblue:
+            {
+                if(buffer.size() > 4) {
+                    std::memcpy(cursor.redgreenblue, buffer.data() + 1, 3);
+                    cursor.is_full = 0x1;
+                }
+                
+                break;
             }
         }
     }
 
-    void cursor_loop() {}
+    void cursor_loop() {
+        constexpr uint8_t opcode_cursors_v1 = 0xA4;
+        for(auto &pair: m_connections) {
+            std::vector<uint8_t> buffer(1);
+            buffer[0] = opcode_cursors_v1;
+            buffer.reserve(m_connections.size() * 30);
+            int offset = 1;
+            
+            cursor_data& me = pair.second;
+            
+            for(auto &other_pair: m_connections) {
+                cursor_data& other = pair.second;
+
+                if(other.id == me.id) continue;
+                if(other.world != me.world) continue;
+
+                other.get_data(buffer, offset, other);
+            }
+            
+            server.send(pair.first, buffer.data(), buffer.size(), websocketpp::frame::opcode::binary);
+        }
+
+        for(auto hdl: dels) {
+            m_connections.erase(hdl);
+        }
+
+        dels.clear();
+    }
 private:
     server m_server;
 
@@ -195,6 +290,8 @@ private:
     } connection_hdl_equal;
     
     std::unordered_map<connection_hdl, cursor_data, connection_hdl_hash, connection_hdl_equal> m_connections;
+
+    std::unordered_set<connection_hdl, connection_hdl_hash, connection_hdl_equal> dels;
 };
 
 // some stuff
@@ -218,5 +315,9 @@ int main() {
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
+    websocketpp::lib::thread t(&cursors_server::cursor_loop, &server);
+    
     server.run(8081);
+
+    t.join();
 }
