@@ -254,7 +254,8 @@ public:
         constexpr uint8_t opcode_cursors_v1 = 0xA4;
         while(1) {
             while(m_connections.size() < 2) {
-               m_cursors_cond.wait(lock);
+                std::unique_lock<std::mutex> lock(m_mutex);
+                m_cursors_cond.wait(lock);
             }
             
             for(auto &pair: m_connections) {
@@ -303,6 +304,7 @@ private:
 
     std::unordered_set<connection_hdl, connection_hdl_hash, connection_hdl_equal> dels;
 
+    websocketpp::lib::mutex m_mutex;
     condition_variable m_cursors_cond;
 };
 
