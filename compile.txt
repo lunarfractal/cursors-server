@@ -1,3 +1,0 @@
-yay -S websocketpp(arch) OR sudo apt install libwebsocketpp-dev(ubuntu/debian)
-g++ server.cpp -o server_bin
-./server_bin
